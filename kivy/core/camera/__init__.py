@@ -292,7 +292,11 @@ def _compatible_providers(platform, python_version):
         yield _OPENCV2
 
 
-Camera = core_select_lib(
-    'camera',
-    _compatible_providers(platform, version_info)
-)
+def _get_compatible_provider(platform, version_info):
+    return core_select_lib(
+        'camera',
+        _compatible_providers(platform, version_info)
+    )
+
+
+Camera = _get_compatible_provider(platform, version_info)
