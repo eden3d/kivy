@@ -135,6 +135,14 @@ class CameraBase(EventDispatcher, metaclass=ABCMeta):
     def started(self):
         return self._started
 
+    @property
+    def fps(self):
+        return self._fps
+
+    @property
+    def interval(self):
+        return 1 / float(self.fps)
+
     """
     Camera writable properties
     --------------------------
