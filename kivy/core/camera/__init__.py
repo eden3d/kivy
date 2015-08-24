@@ -28,7 +28,6 @@ Core class for acquiring the camera and converting its input into a
 from sys import version_info
 
 from abc import ABCMeta, abstractmethod
-from contextlib import contextmanager
 
 from kivy.utils import platform
 from kivy.event import EventDispatcher
