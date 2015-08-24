@@ -182,7 +182,7 @@ class CameraBase(EventDispatcher, metaclass=ABCMeta):
                 "Could not paint image buffer, texture is undefined"
             )
         else:
-            texture.blit_buffer(buffer, colorfmt=image_format)
+            texture.blit_buffer(buffer, colorfmt=self.image_format)
 
         self.dispatch('on_texture')
 
@@ -272,13 +272,15 @@ class CameraBase(EventDispatcher, metaclass=ABCMeta):
 Camera provider handling
 ++++++++++++++++++++++++
 """
+
+
 def _compatible_providers(platform, python_version):
     if platform == 'win':
         yield _VIDEOCAPTURE
     elif platform == 'macosx':
-        yield _AVFOUNDATION)
+        yield _AVFOUNDATION
     elif platform == 'android':
-        yield _ANDROID)
+        yield _ANDROID
     else:
         # yield _GI
         # FIXME: Why is Gi disabled ?
