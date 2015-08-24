@@ -26,7 +26,7 @@ from cv2 import (
 # Constants
 # ---------
 IMAGE_FORMAT = 'bgr'  # OpenCV image format
-
+FALLBACK_FPS = 30
 
 # Exports
 # -------
@@ -78,183 +78,77 @@ class CameraOpenCV(CameraBase):
                 "".format(ex)
             )
 
-    def init_camera(self):
-        """Acquire camera and initialize capture
+    def _configure_fps(self):
+        fps = self.capture.get(FPS)
 
-        """
-        image_format = self._format = IMAGE_FORMAT
-        index = self._index
-        width, height = self._resolution
-
-        if __debug__:
-            Logger.debug(
-                "Camera: initializing (index: {}, image format: {}), "
-                "asking for size {}x{}"
-                "".format(index, image_format, width, height)
+        if fps <= 0:
+            Logger.info(
+                "invalid FPS ('{}') returned by camera, using {} as fallback"
+                "".format(self.fps, FALLBACK_FPS)
             )
+            self._fps = FALLBACK_FPS
+        elif self._fps != fps:
+            self._fps = fps
 
-        self.capture.open(index)
 
-        if __debug__:
-            Logger.debug("Camera: opened, setting resolution...")
+    def _configure_resolution(self):
+        width, height = self._resolution
 
         self.capture.set(FRAME_WIDTH, width)
         self.capture.set(FRAME_HEIGHT, height)
 
-        if __debug__:
-            Logger.debug("Camera: resolution set, grab & read...")
-
-        self.capture.grab()
-
         ok, frame = self.capture.read()
 
         if not ok:
-            raise CaptureError(
-                "Could not read image from camera", self.capture
-            )
+            raise CaptureError("could not read initial image")
 
         frame_height = len(frame)
         frame_width = len(frame[0])
 
-        if __debug__:
-            Logger.debug(
-                "Camera: first frame size: {}x{}"
+        if width != frame_width or height != frame_height:
+            Logger.info(
+                "Camera: size corrected by camera : {}x{}"
                 "".format(frame_width, frame_height)
             )
-
-        if width != frame_width or height != frame_height:
-            if __debug__:
-                Logger.debug(
-                    "Camera: size corrected by camera : {}x{}"
-                    "".format(frame_width, frame_height)
-                )
+            # NOTE: do not use property here, it would cause infinite
+            # recursion. We want to update the resolution with the frame's size
+            # without triggering resolution reconfiguration
             self._resolution = frame_width, frame_height
 
-        self.fps = self.capture.get(FPS)
+    def _create_texture(self):
+        self._texture = Texture.create(self._resolution)
+        self._texture.flip_vertical()
 
-        # needed because FPS determines rescheduling rate
-        if self.fps <= 0:
-            Logger.warning(
-                "invalid FPS ('{}') returned by camera, using 30 as default"
-                "".format(self.fps)
-            )
-            self.fps = 1 / 30.0
+        self.dispatch('on_load')
 
-        if not self.stopped:
-            if __debug__:
-                Logger.debug("starting camera (initializing)")
-            self.start()
+    def open(self):
+        super().open()
 
-    def _release(self):
-        """Release camera.
+        self.capture.open(self.index)
 
-        This method unschedules frame update routines, then closes the capture
-        the device and releases the camera.
-
-        """
-        if __debug__:
-            Logger.debug("Camera: releasing...")
-
-        if not self.stopped:
-            self.stop()
-
-        if __debug__:
-            Logger.debug("Camera: schedule stop of update tasks")
+    def stop(self):
+        super().stop()
 
         self.capture.release()
 
-        if __debug__:
-            Logger.debug("released camera")
+    def configure(self):
+        super().configure()
 
-    def _update_frame(self, delta):
-        """Update GPU buffer with camera image data.
-
-        """
-        if __debug__:
-            Logger.debug(
-                "Camera: updating GPU buffer... (delta: {})".format(delta)
-            )
-
-        if self.stopped:
-            # Don't update it camere stopped
-            if __debug__:
-                Logger.debug(
-                    "frame update skipped as camera is stopped"
-                )
-            return
-
-        if self._texture is None:
-            if __debug__:
-                Logger.debug(
-                    "Camera: creating initial texture"
-                )
-            # Create the initial texture
-            self._texture = Texture.create(self._resolution)
-            self._texture.flip_vertical()
-            self.dispatch('on_load')
-        try:
-            # Read buffer
-            ok, frame = self.capture.read()
-
-            # ok: boolean indicating whether frame reading was successfull
-            # frame: numpy matrix of pixel color values
-
-            if not ok:
-                raise CaptureError("Could not read image from camera", self)
-
-        except Exception as ex:
-            Logger.exception(
-                "Error while reading frame from camera : {}"
-                .format(ex)
-            )
-        else:
-            self._buffer = frame.tostring()
-
-            if __debug__:
-                Logger.debug(
-                    "Camera: got new frame (size: {})"
-                    "".format(len(self._buffer))
-                )
-
-            # this copies the image data to the OpenGL buffer
-            #
-            # (using Texture._blit_buffer)
-            #
-            self._copy_to_gpu()
-
-            if __debug__:
-                Logger.debug(
-                    "GPU buffer updated"
-                )
+        self._configure_resolution()
+        self._configure_fps()
 
     def start(self):
         """Start frame updating.
 
         This method is not blocking, the update routine is just scheduled in
         Kivy's clock."""
-
-        if not self.capture.isOpened():
-            Logger.exception(
-                "Camera is not open, cannot schedule frame updates",
-            )
-            return
-
-        if __debug__:
-            Logger.debug("Camera: starting capture...")
-
         super(CameraOpenCV, self).start()
 
-        if __debug__:
-            Logger.debug(
-                "unschedule update & reschedule with current FPS ({})"
-                "".format(self.fps)
-            )
+        if not self.capture.isOpened():
+            raise CaptureError("Camera is not open")
 
-        Clock.unschedule(self._update_frame)
-        Clock.schedule_interval(self._update_frame, 1 / self.fps)
-
-        if __debug__:
-            Logger.debug("Camera: capture started")
+        self.unschedule()
+        Clock.schedule(self.update, self.interval)
 
     def stop(self):
         """Stop frame updating. This does not release the camera.
@@ -263,15 +157,30 @@ class CameraOpenCV(CameraBase):
         from Kivy's clock.
 
         """
-        if __debug__:
-            Logger.debug("Camera: stopping capture...")
-
         super(CameraOpenCV, self).stop()
 
-        if __debug__:
-            Logger.debug("Camera: unschedule next update")
-
-        Clock.unschedule(self._update_frame)
+        Clock.unschedule(self.update)
 
         if __debug__:
             Logger.debug("Camera: capture stopped")
+
+    def update(self, delta):
+        """Update GPU buffer with camera image data.
+
+        """
+        super().update()
+
+        if self.stopped:
+            # Don't update it camere stopped
+            Logger.info("Camera: frame update skipped as camera is stopped")
+            return
+
+        if self._texture is None:
+            self._create_texture()
+
+        ok, frame = self.capture.read()
+
+        if not ok:
+            raise CaptureError("Could not read image from camera", self)
+
+        self.paint(frame.tostring())
