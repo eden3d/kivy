@@ -26,7 +26,6 @@ Core class for acquiring the camera and converting its input into a
 # TODO: Implement retro-compatibility (with 1.9.0's CameraBase class)
 #
 from sys import version_info
-
 from abc import ABCMeta, abstractmethod
 
 from kivy.utils import platform
@@ -55,6 +54,8 @@ __all__ = (
 Camera base abstract class
 ++++++++++++++++++++++++++
 """
+
+
 class CameraBase(EventDispatcher, metaclass=ABCMeta):
     """Abstract color camera widget
 
