@@ -24,6 +24,7 @@ Core class for acquiring the camera and converting its input into a
 """
 #
 # TODO: Implement retro-compatibility (with 1.9.0's CameraBase class)
+#  - init_camera() : should be OK
 #
 from sys import version_info
 from abc import ABCMeta, abstractmethod
@@ -267,6 +268,9 @@ class CameraBase(EventDispatcher, metaclass=ABCMeta):
         """Exit the camera context (stops capture & closes camera)"""
         self.close()
 
+    def init_camera(self):
+        self.open()
+        self.configure()
 
 """
 Camera provider handling
