@@ -148,7 +148,7 @@ class CameraBase(EventDispatcher, metaclass=ABCMeta):
     def resolution(self, value):
         if value != self._resolution:
             self._resolution = value
-            self.reconfigure()
+            self.configure()
 
     @property
     def index(self):
@@ -158,7 +158,8 @@ class CameraBase(EventDispatcher, metaclass=ABCMeta):
     def index(self, value):
         if value != self._index:
             self._index = value
-            self.reopen()
+            self.close()
+            self.open()
 
     """
     Paint method - should be called by the update() implementation
