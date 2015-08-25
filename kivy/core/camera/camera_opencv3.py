@@ -147,7 +147,7 @@ class CameraOpenCV(CameraBase):
             raise CaptureError("Camera is not open")
 
         Clock.unschedule(self.update)
-        Clock.schedule(self.update, self.interval)
+        Clock.schedule_interval(self.update, self.interval)
 
     def stop(self):
         """Stop frame updating. This does not release the camera.
