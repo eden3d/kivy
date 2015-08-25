@@ -99,7 +99,7 @@ class CameraOpenCV(CameraBase):
         ok, frame = self.capture.read()
 
         if not ok:
-            raise CaptureError("could not read initial image")
+            raise CaptureError("could not read initial image", self)
 
         frame_height = len(frame)
         frame_width = len(frame[0])
