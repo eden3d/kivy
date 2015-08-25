@@ -167,7 +167,7 @@ class CameraOpenCV(CameraBase):
         """Update GPU buffer with camera image data.
 
         """
-        super().update()
+        super().update(delta)
 
         if self.stopped:
             # Don't update it camere stopped
