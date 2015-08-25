@@ -90,7 +90,6 @@ class CameraOpenCV(CameraBase):
         elif self._fps != fps:
             self._fps = fps
 
-
     def _configure_resolution(self):
         width, height = self._resolution
 
@@ -126,7 +125,7 @@ class CameraOpenCV(CameraBase):
 
         self.capture.open(self.index)
 
-    def stop(self):
+    def close(self):
         super().stop()
 
         self.capture.release()
