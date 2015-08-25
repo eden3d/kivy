@@ -109,9 +109,9 @@ class CameraBase(EventDispatcher, metaclass=ABCMeta):
         self._configured = False
         self._started = False
 
-        super(CameraBase, self).__init__(**kwargs)
+        super(CameraBase, self).__init__()
 
-        if not kwargs.get('stopped', self.default_stopped):
+        if not kwargs.get('stopped', False):
             self.start()
 
     def on_texture(self):
@@ -137,8 +137,13 @@ class CameraBase(EventDispatcher, metaclass=ABCMeta):
         return self._started
 
     @property
+    def stopped(self):
+        return not self._started
+
+    @property
     def fps(self):
         return self._fps
+
     @property
     def interval(self):
         return 1 / float(self.fps)
