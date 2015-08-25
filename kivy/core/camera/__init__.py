@@ -139,7 +139,6 @@ class CameraBase(EventDispatcher, metaclass=ABCMeta):
     @property
     def fps(self):
         return self._fps
-
     @property
     def interval(self):
         return 1 / float(self.fps)

@@ -91,6 +91,7 @@ _kivy_modules = [
     'kivy.core.camera.camera_avfoundation',
     'kivy.core.camera.camera_pygst',
     'kivy.core.camera.camera_opencv',
+    'kivy.core.camera.camera_opencv3',
     'kivy.core.camera.camera_videocapture',
     'kivy.core.clipboard.clipboard_sdl2',
     'kivy.core.clipboard.clipboard_android',
