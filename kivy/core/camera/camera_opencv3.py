@@ -146,7 +146,7 @@ class CameraOpenCV(CameraBase):
         if not self.capture.isOpened():
             raise CaptureError("Camera is not open")
 
-        self.unschedule()
+        Clock.unschedule(self.update)
         Clock.schedule(self.update, self.interval)
 
     def stop(self):
