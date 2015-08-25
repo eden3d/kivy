@@ -109,6 +109,8 @@ class CameraBase(EventDispatcher, metaclass=ABCMeta):
         self._configured = False
         self._started = False
 
+        self._fps = 0
+
         super(CameraBase, self).__init__()
 
         if not kwargs.get('stopped', False):
