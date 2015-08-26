@@ -29,10 +29,14 @@ Core class for acquiring the camera and converting its input into a
 from sys import version_info
 from abc import ABCMeta, abstractmethod
 
-from kivy.utils import platform
-from kivy.event import EventDispatcher
-from kivy.logger import Logger
 from kivy.core import core_select_lib
+from kivy.utils import platform
+
+from kivy.event import EventDispatcher
+from kivy.clock import Clock
+from kivy.logger import Logger
+
+from kivy.graphics.texture import Texture
 
 DEFAULT_INDEX = 0
 DEFAULT_RESOLUTION = 640, 480
@@ -92,23 +96,19 @@ class CameraBase(EventDispatcher, metaclass=ABCMeta):
     image_format = 'rgb'
     __events__ = ('on_load', 'on_texture')
 
-    """
-    Initializer & events handlers
-    -----------------------------
-    """
     def __init__(self, **kwargs):
+        """Camera base class initializer"""
         self._index = kwargs.get('index', DEFAULT_INDEX)
         self._resolution = kwargs.get('resolution', DEFAULT_RESOLUTION)
-        kwargs.setdefault('size', self._resolution)
 
         self._buffer = None
         self._texture = None
-        self._device = None
 
         self._acquired = False
-        self._configured = False
+        self._ready = False
         self._started = False
 
+        self._clock = Clock()
         self._fps = 0
 
         super(CameraBase, self).__init__()
@@ -122,17 +122,21 @@ class CameraBase(EventDispatcher, metaclass=ABCMeta):
     def on_load(self):
         pass
 
-    """
-    Camera read-only properties
-    ---------------------------
+    """Camera read-only properties
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    The value of these properties is read-only and should normally not be
+    modified by users of this class or subclasses, as it should be set
+    exclusively by internal methods defined in this base class.
+
     """
     @property
     def acquired(self):
         return self._acquired
 
     @property
-    def configured(self):
-        return self._configured
+    def ready(self):
+        return self._ready
 
     @property
     def started(self):
@@ -142,19 +146,34 @@ class CameraBase(EventDispatcher, metaclass=ABCMeta):
     def stopped(self):
         return not self._started
 
-    @property
-    def fps(self):
-        return self._fps
+    """Computed properties
+    ~~~~~~~~~~~~~~~~~~~~~~
 
+    These properties values are either computed from other properties, or their
+    value is automatically initialized by their getter when it is not set
+
+    """
     @property
     def interval(self):
         return 1 / float(self.fps)
 
+    @property
+    def texture(self):
+        if self._texture is None:
+            self._texture = Texture.create(self._resolution)
+            self._texture.flip_vertical()
+            self.dispatch('on_load')
+        return self._texture
+
+    """Camera writable properties
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    These properties trigger events when their values are modified
+
     """
-    Camera writable properties
-    --------------------------
-    (these properties trigger reconfiguration when their value is modified)
-    """
+
+    # Index and resolution properties (they trigger reconfiguration when
+    # changed, if a camera is acquired)
     @property
     def resolution(self):
         return self._resolution
@@ -163,7 +182,8 @@ class CameraBase(EventDispatcher, metaclass=ABCMeta):
     def resolution(self, value):
         if value != self._resolution:
             self._resolution = value
-            self.configure()
+            if self.acquired and self.ready:
+                self.prepare()
 
     @property
     def index(self):
@@ -173,97 +193,131 @@ class CameraBase(EventDispatcher, metaclass=ABCMeta):
     def index(self, value):
         if value != self._index:
             self._index = value
-            self.close()
-            self.open()
+            if self.acquired:
+                self.acquire()
+
+    # FPS property (triggers rescheduling on update, if started)
+    @property
+    def fps(self):
+        return self._fps
+
+    @fps.setter
+    def fps(self, value):
+        if value != self._fps:
+            self._fps = value
+            if self.started:
+                self.schedule()
+
+    """Frame updating methods
+    ~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    These methods handle updating the texture with the image buffer using the
+    correct color format, by scheduling them with Kivy's `Clock`.
+    """
+    def unschedule(self):
+        self.clock.unschedule(self.update)
+
+    def schedule(self):
+        self.unschedule()
+        self.clock.schedule(self.update, self.interval)
+
+    def update(self, buffer):
+        self.texture._blit_buffer(buffer, colorfmt=self.image_format)
+
+    """Camera handling methods
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    These methods handle camera acquisition, preparation and release.
+
+    These methods are public methods, and should do their best not to raise an
+    exception, for example by stopping the capture before releasing the camera.
 
     """
-    Paint method - should be called by the update() implementation
-    --------------------------------------------------------------
-    """
-    def paint(self, buffer):
-        """Copy the the buffer into the texture"""
-        texture = self._texture
-
-        if texture is None:
-            Logger.warning(
-                "Could not paint image buffer, texture is undefined"
+    def acquire(self):
+        if self.acquired:
+            Logger.info(
+                "Camera: asked to acquire camera while already open, "
+                "closing beforehand"
             )
-        else:
-            texture.blit_buffer(buffer, colorfmt=self.image_format)
+            self.release()
+        self.open()
+        self._acquired = True
+        self._ready = False
 
-        self.dispatch('on_texture')
+    def release(self):
+        if self.started:
+            self.stop()
+        self.close()
+        self._acquired = False
+
+    def prepare(self):
+        self._ready = False
+        if not self.acquired:
+            self._acquire()
+        self.configure()
+        self._ready = True
+
+    """Image capture control methods
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    These methods start and stop the camera feedback, by scheduling and
+    unscheduling the frame update routine.
 
     """
-    Abstract methods
-    ----------------
-     - All of these methods should be implemented by Camera providers
-     - All implementations should call their super-method before actually doing
-    the implemented operation
+    def start(self):
+        if not self.ready:
+            self.prepare()
+        self.schedule()
+        self._started = True
+
+    def stop(self):
+        self.unschedule()
+        self._started = False
+
+    """Abstract methods
+    ~~~~~~~~~~~~~~~~~~~
+
+    These methods should be implemented by the Camera providers as
+    methods. These methods should be as idempotent as possible, the only expected
+    side-effects are the FPS and resolution changes in :func:`configure`.
+
     """
     @abstractmethod
     def open(self):
-        """Initialize capture device and acquire camera
-
-        """
-        self._acquired = True
-
-    @abstractmethod
-    def close(self):
-        """Release camera and close capture device"
-
-        """
-        if self.started:
-            self.stop()
-        self._acquired = False
-
-    @abstractmethod
-    def configure(self):
-        """Configure capture device
-
-        (usually, setting the resolution and correcting our resolution with the
-        resolution of the received frame, as some cameras may not obey.)
-
-        """
-        if not self.acquired:
-            self.open()
-        self._configured = True
-
-    @abstractmethod
-    def start(self):
-        """Start frame acquisition
-
-        The implementation of this abstract method should schedule the next
-        frame updates using the FPS obtained at the configuration step.
-
-        """
-        if not self.configured:
-            self.configure()
-        self._started = True
-
-    @abstractmethod
-    def stop(self):
-        """Stop frame acquisition.
-
-        The implementation of this abstract method should unschedule the frame
-        updates (but not release the camera, see :func:`close`).
-
-        """
-        self._started = False
-
-    @abstractmethod
-    def update(self, delta):
-        """Update the current frame with camera's data (internal).
-
-        .. note:: The implementation of this abstract method should be calling
-        :func:`paint` when it has a read an image buffer from the camera.
+        """Initialize capture device and acquire camera.
 
         """
         pass
 
-    """
-    Context manager
-    ---------------
-    (allows the Camera object to be used as a context descriptor)
+    @abstractmethod
+    def close(self):
+        """Release camera and close capture device.
+
+        """
+        pass
+
+    @abstractmethod
+    def configure(self):
+        """Configure capture device.
+
+        Usually, set the resolution and correct our resolution with the
+        resolution of the received frame, as some cameras may not obey.
+
+        """
+        pass
+
+    @abstractmethod
+    def read(self):
+        """Read image from camera and return as string buffer.
+
+        """
+        pass
+
+    """Context manager
+    ~~~~~~~~~~~~~~~~~~
+
+    Allows the Camera object to be used as a context descriptor.
+
     """
     def __enter__(self):
         """Enter the camera context (opens camera & starts capture)"""
@@ -273,7 +327,15 @@ class CameraBase(EventDispatcher, metaclass=ABCMeta):
     def __exit__(self, *exc_details):
         """Exit the camera context (stops capture & closes camera)"""
         self.close()
+        return False
 
+    """Retro-compatibility methods
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    Implemented to support the camera providers made for the old CameraBase
+    class.
+
+    """
     def init_camera(self):
         self.open()
         self.configure()
