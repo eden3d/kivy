@@ -59,24 +59,55 @@ class CameraOpenCV(CameraBase):
     Uses the :mod:`cv2` module, and its :class:`cv2.VideoCapture` class.
 
     """
+    image_format = 'bgr'
+    initial_retry = 60
+    fps_average_size = 5
 
     def __init__(self, **kwargs):
         """Initialize OpenCV Camera provider"""
         self.capture = VideoCapture()
+        self._retry = self.initial_retry
 
         if __debug__:
+            from collections import deque
+            self._deltas = deque(maxlen=self.fps_average_size)
             Logger.debug(
                 "Camera: initializing capture ({})'"
                 "".format(self.capture)
             )
 
+        super(CameraOpenCV, self).__init__(**kwargs)
+
+    def _read_frame(self):
         try:
-            super(CameraOpenCV, self).__init__(**kwargs)
-        except CaptureError as ex:
-            Logger.exception(
-                "Camera: Exception while initializing camera : {}"
-                "".format(ex)
+            ok, frame = self.capture.read()
+        except OSError as ex:
+            Logger.warning(
+                "System exception while reading from camera : {}".format(ex)
             )
+            ok, frame = False, None
+        except MemoryError as ex:
+            Logger.warning(
+                "Memory exception while reading from camera : {}".format(ex)
+            )
+            ok, frame = False, None
+        except Exception as ex:
+            Logger.warning(
+                "Unknown exception while reading from camera : {}".format(ex)
+            )
+        else:
+            self.paint(frame.tostring())
+        finally:
+            if not ok:
+                if self._retry:
+                    Logger.warning("Could not read frame from camera, retrying...")
+                    self._retry -= 1
+                else:
+                    Logger.exception(
+                        "Failed getting image data from camera, "
+                        "stopping capture..."
+                    )
+                    self.stop()
 
     def _configure_fps(self):
         fps = self.capture.get(FPS)
@@ -96,11 +127,7 @@ class CameraOpenCV(CameraBase):
         self.capture.set(FRAME_WIDTH, width)
         self.capture.set(FRAME_HEIGHT, height)
 
-        ok, frame = self.capture.read()
-
-        if not ok:
-            raise CaptureError("could not read initial image", self)
-
+        frame = self._read_frame()
         frame_height = len(frame)
         frame_width = len(frame[0])
 
@@ -120,12 +147,12 @@ class CameraOpenCV(CameraBase):
 
         self.dispatch('on_load')
 
-    def open(self):
+    def acquire(self):
         super().open()
 
         self.capture.open(self.index)
 
-    def close(self):
+    def release(self):
         super().stop()
 
         self.capture.release()
@@ -143,11 +170,12 @@ class CameraOpenCV(CameraBase):
         Kivy's clock."""
         super(CameraOpenCV, self).start()
 
-        if not self.capture.isOpened():
-            raise CaptureError("Camera is not open")
-
-        Clock.unschedule(self.update)
-        Clock.schedule_interval(self.update, self.interval)
+        if self.capture.isOpened():
+            Clock.unschedule(self.update)
+            Clock.schedule_interval(self.update, self.interval)
+        else:
+            Logger.exception("Failed camera start, camera is not open")
+            self.stop()
 
     def stop(self):
         """Stop frame updating. This does not release the camera.
@@ -169,6 +197,14 @@ class CameraOpenCV(CameraBase):
         """
         super().update(delta)
 
+        if __debug__:
+            self._deltas.append(delta)
+            avg_fps = 1 / (sum(self._deltas / len(self._deltas))
+            Logger.debug(
+                "Updating current camera frame "
+                "(average FPS: {})".format(avg_fps)
+            )
+
         if self.stopped:
             # Don't update it camere stopped
             Logger.info("Camera: frame update skipped as camera is stopped")
@@ -177,9 +213,4 @@ class CameraOpenCV(CameraBase):
         if self._texture is None:
             self._create_texture()
 
-        ok, frame = self.capture.read()
-
-        if not ok:
-            raise CaptureError("Could not read image from camera", self)
-
-        self.paint(frame.tostring())
+        self.paint(self._read_frame())
