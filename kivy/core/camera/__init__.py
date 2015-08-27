@@ -259,7 +259,8 @@ class CameraBase(EventDispatcher, metaclass=ABCMeta):
     def fps(self, value):
         if value <= 0:
             Logger.info(
-                "Tried to set invalid FPS ({}), using {} as a fallback."
+                "Camera: Tried to set invalid FPS ({}), "
+                "using {} as a fallback."
                 "".format(value, FALLBACK_FPS)
             )
             value = FALLBACK_FPS
@@ -289,7 +290,7 @@ class CameraBase(EventDispatcher, metaclass=ABCMeta):
         try:
             buffer = self.read().tostring()
         except Exception as ex:
-            Logger.exception("Could not read from camera : {}".format(ex))
+            Logger.exception("Camera: Could not read : {}".format(ex))
         else:
             self.texture.blit_buffer(buffer, colorfmt=self.image_format)
         finally:
@@ -314,7 +315,7 @@ class CameraBase(EventDispatcher, metaclass=ABCMeta):
         try:
             self.open()
         except Exception as ex:
-            Logger.exception("Could not acquire camera : {}".format(ex))
+            Logger.exception("Camera: Could not acquire : {}".format(ex))
         else:
             self._acquired = True
             self._ready = False
@@ -327,7 +328,7 @@ class CameraBase(EventDispatcher, metaclass=ABCMeta):
         try:
             self.close()
         except Exception as ex:
-            Logger.exception("Could not close camera : {}".format(ex))
+            Logger.exception("Camera: Could not close : {}".format(ex))
         else:
             self._acquired = False
         finally:
@@ -341,7 +342,7 @@ class CameraBase(EventDispatcher, metaclass=ABCMeta):
             self.configure()
             self._resolution = self.get_frame_resolution(self.read())
         except Exception as ex:
-            Logger.exception("Could not prepare camera : {}".format(ex))
+            Logger.exception("Camera: Could not prepare : {}".format(ex))
         else:
             self._ready = True
         finally:
