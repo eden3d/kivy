@@ -32,6 +32,7 @@ Core class for acquiring the camera and converting its input into a
 from sys import version_info
 from abc import ABCMeta, abstractmethod
 from inspect import getsource
+from collections import deque
 
 from kivy.core import core_select_lib
 from kivy.utils import platform, deprecated
@@ -116,6 +117,7 @@ class CameraBase(EventDispatcher, metaclass=ABCMeta):
     ~~~~~~~~~~~~~~~~
     """
     image_format = 'rgb'
+    real_fps_sample_size = 8
     __events__ = ('on_load', 'on_texture')
 
     """
@@ -163,6 +165,7 @@ class CameraBase(EventDispatcher, metaclass=ABCMeta):
         self._started = False
 
         self._fps = 0
+        self._deltas = deque(maxlen=self.real_fps_sample_size)
 
         super(CameraBase, self).__init__()
 
@@ -199,6 +202,10 @@ class CameraBase(EventDispatcher, metaclass=ABCMeta):
     def stopped(self):
         return not self._started
 
+    @property
+    def deltas(self):
+        return self._deltas
+
     """Computed properties
     ~~~~~~~~~~~~~~~~~~~~~~
 
@@ -217,6 +224,14 @@ class CameraBase(EventDispatcher, metaclass=ABCMeta):
             self._texture.flip_vertical()
             self.dispatch('on_load')
         return self._texture
+
+    @property
+    def real_fps(self):
+        deltas = self._deltas
+        if deltas:
+            return len(deltas) / sum(deltas)
+        else:
+            return 0
 
     """Camera writable properties
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -277,13 +292,13 @@ class CameraBase(EventDispatcher, metaclass=ABCMeta):
     """
     def unschedule(self):
         Clock.unschedule(self.update)
+        self.deltas.clear()
 
     def schedule(self):
         self.unschedule()
         Clock.schedule_interval(self.update, self.interval)
 
     def update(self, delta):
-        print(delta)
         if not self.started:
             Logger.info("Camera: ignoring frame update as capture is stopped")
             return False
@@ -293,8 +308,13 @@ class CameraBase(EventDispatcher, metaclass=ABCMeta):
             Logger.exception("Camera: Could not read : {}".format(ex))
         else:
             self.texture.blit_buffer(buffer, colorfmt=self.image_format)
-        finally:
             self.dispatch('on_texture')
+            Logger.debug(
+                "Camera: GPU frame updated, current real FPS : {}"
+                "".format(self.real_fps)
+            )
+        finally:
+            self.deltas.append(delta)
 
     """Camera handling methods
     ~~~~~~~~~~~~~~~~~~~~~~~~~~
