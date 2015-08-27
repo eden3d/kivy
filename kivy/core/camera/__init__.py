@@ -25,12 +25,16 @@ Core class for acquiring the camera and converting its input into a
 #
 # TODO: Implement retro-compatibility (with 1.9.0's CameraBase class)
 #  - init_camera() : should be OK
+#  (NOTE: use @deprecated for retro-compat methods)
 #
+# TODO: Missing docstrings and documentation of reserved keywords
+
 from sys import version_info
 from abc import ABCMeta, abstractmethod
+from inspect import getsource
 
 from kivy.core import core_select_lib
-from kivy.utils import platform
+from kivy.utils import platform, deprecated
 
 from kivy.event import EventDispatcher
 from kivy.clock import Clock
@@ -40,24 +44,42 @@ from kivy.graphics.texture import Texture
 
 DEFAULT_INDEX = 0
 DEFAULT_RESOLUTION = 640, 480
+FALLBACK_FPS = 30
 
-_VIDEOCAPTURE = 'videocapture', 'camera_videocapture', 'CameraVideoCapture'
-_AVFOUNDATION = 'avfoundation', 'camera_avfoundation', 'CameraAVFoundation'
-_ANDROID = 'android', 'camera_android', 'CameraAndroid'
-_PYGST = 'pygst', 'camera_pygst', 'CameraPyGst'
-_GI = 'gi', 'camera_gi', 'CameraGi'
-_OPENCV2 = 'opencv', 'camera_opencv', 'CameraOpenCV'
-_OPENCV3 = 'opencv3', 'camera_opencv3', 'CameraOpenCV'
+PROVIDERS = [
+    ('videocapture', 'camera_videocapture', 'CameraVideoCapture'),
+    ('avfoundation', 'camera_avfoundation', 'CameraAVFoundation'),
+    ('android', 'camera_android', 'CameraAndroid'),
+    ('pygst', 'camera_pygst', 'CameraPyGst'),
+    ('gi', 'camera_gi', 'CameraGi',),
+    ('opencv', 'camera_opencv', 'CameraOpenCV'),
+    ('opencv3', 'camera_opencv3', 'CameraOpenCV'),
+]
 
+PROVIDER_CHECKS = {
+    'videocapture':
+    lambda platform, python: platform == 'win',
+    'avfoundation':
+    lambda platform, python: platform == 'macosx',
+    'android':
+    lambda platform, python: platform == 'android',
+    'pygst':
+    lambda platform, python: platform not in ('win', 'macosx', 'android'),
+    'opencv3':
+    lambda platform, python: True,
+    'opencv':
+    lambda platform, python: python.major == 2,
+}
 
 __all__ = (
-    'DEFAULT_INDEX', 'DEFAULT_RESOLUTION',
-    'CameraBase', 'Camera'
+    'DEFAULT_INDEX', 'DEFAULT_RESOLUTION', 'FALLBACK_FPS', 'PROVIDERS',
+    'Camera',
 )
 
+
 """
-Camera base abstract class
-++++++++++++++++++++++++++
+Camera base abstract class (and basic variations)
++++++++++++++++++++++++++++++++++++++++++++++++++
 """
 
 
@@ -87,14 +109,46 @@ class CameraBase(EventDispatcher, metaclass=ABCMeta):
         `on_load`
             Fired when the camera is loaded and the texture has become
             available.
-        `on_frame`
+        `on_texture`
             Fired each time the camera texture is updated.
 
     Class attributes
-    ----------------
+    ~~~~~~~~~~~~~~~~
     """
     image_format = 'rgb'
     __events__ = ('on_load', 'on_texture')
+
+    """
+    Provider handling and utility static methods
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    """
+    @staticmethod
+    def get_providers():
+        for name, module, classname in PROVIDERS:
+            platform_check = PROVIDER_CHECKS.get(name, None)
+            if not platform_check or platform_check(platform, version_info):
+                yield name, module, classname
+            else:
+                try:
+                    source = getsource(platform_check).strip(' \n,')[25:]
+                except Exception:
+                    source = "unknown"
+                finally:
+                    Logger.debug(
+                        "Camera: ignored {} provider : a platform check was"
+                        "failed ({})".format(name, source)
+                    )
+
+    @staticmethod
+    def get_frame_resolution(frame):
+        height = len(frame)
+        width = len(frame[0]) if height else 0
+        return width, height
+
+    """
+    Base initializer
+    ~~~~~~~~~~~~~~~~
+    """
 
     def __init__(self, **kwargs):
         """Camera base class initializer"""
@@ -336,39 +390,37 @@ class CameraBase(EventDispatcher, metaclass=ABCMeta):
     class.
 
     """
+    @deprecated
     def init_camera(self):
-        self.open()
-        self.configure()
+        self.prepare()
+
+
+class SimpleCameraBase(CameraBase):
+    """Simpler color camera base class, replaces :func:`configure` with two
+    dedicated methods for setting the camera's resolution and obtained its
+    framerate.
+
+    """
+    def configure(self):
+        self.set_device_resolution(*self.resolution)
+        self.fps = self.get_device_fps()
+
+    @abstractmethod
+    def set_device_resolution(self, width, height):
+        pass
+
+    @abstractmethod
+    def get_device_fps(self):
+        pass
 
 """
-Camera provider handling
-++++++++++++++++++++++++
+Camera provider class
++++++++++++++++++++++
+
+- first step : :func:`CameraBase.get_providers` filters :attr:`PROVIDERS` using
+  :attr:`PROVIDER_CHECKS`
+- second step : :func:`kivy.core.core_select_lib` selects a working
+  (importable) camera provider
+
 """
-
-
-def _compatible_providers(platform, python_version):
-    if platform == 'win':
-        yield _VIDEOCAPTURE
-    elif platform == 'macosx':
-        yield _AVFOUNDATION
-    elif platform == 'android':
-        yield _ANDROID
-    else:
-        # yield _GI
-        # FIXME: Why is Gi disabled ?
-        yield _PYGST
-
-    yield _OPENCV3
-
-    if python_version.major == 2:
-        yield _OPENCV2
-
-
-def _get_compatible_provider(platform, version_info):
-    return core_select_lib(
-        'camera',
-        _compatible_providers(platform, version_info)
-    )
-
-
-Camera = _get_compatible_provider(platform, version_info)
+Camera = core_select_lib('camera', CameraBase.get_providers())
