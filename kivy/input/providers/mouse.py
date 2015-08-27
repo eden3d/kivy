@@ -46,21 +46,22 @@ touch will simulate a multi-touch event. For example::
     if 'multitouch_sim' in touch.profile:
         touch.multitouch_sim = True
 
-Following is a list of the supported key values for the
-:attr:`~kivy.input.motionevent.MotionEvent.profile` dictionary.
+Following is a list of the supported values for the
+:attr:`~kivy.input.motionevent.MotionEvent.profile` property list.
 
-=================== ==========================================================
-Profile key name    Description
-------------------- ----------------------------------------------------------
-button              Mouse button (one of `left`, `right`, `middle`, `scrollup`
-                    or `scrolldown`).
-pos                 2D position. Also reflected in the
-                    :attr:`~kivy.input.motionevent.MotionEvent.x`,
-                    :attr:`~kivy.input.motionevent.MotionEvent.y`
-                    and :attr:`~kivy.input.motionevent.MotionEvent.pos`
-                    properties.
-multitouch_sim      Specifies whether multitouch is simulated or not.
-=================== ==========================================================
+================ ==========================================================
+Profile value    Description
+---------------- ----------------------------------------------------------
+button           Mouse button (one of `left`, `right`, `middle`, `scrollup`
+                 or `scrolldown`). Accessed via the 'button' property.
+pos              2D position. Also reflected in the
+                 :attr:`~kivy.input.motionevent.MotionEvent.x`,
+                 :attr:`~kivy.input.motionevent.MotionEvent.y`
+                 and :attr:`~kivy.input.motionevent.MotionEvent.pos`
+                 properties.
+multitouch_sim   Specifies whether multitouch is simulated or not. Accessed
+                 via the 'multitouch_sim' property.
+================ ==========================================================
 
 '''
 
@@ -206,7 +207,13 @@ class MouseMotionEventProvider(MotionEventProvider):
         cur.is_double_tap = is_double_tap
         self.touches[id] = cur
         if do_graphics:
-            cur.update_graphics(EventLoop.window, True)
+            # only draw red circle if multitouch is not disabled, and
+            # if the multitouch_on_demenad feature is not enable
+            # (because in that case, we wait to see if multitouch_sim
+            # is True or not before doing the multitouch)
+            create_flag = ((not self.disable_multitouch)
+                and (not self.multitouch_on_demenad))
+            cur.update_graphics(EventLoop.window, create_flag)
         self.waiting_event.append(('begin', cur))
         return cur
 
