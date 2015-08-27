@@ -162,7 +162,6 @@ class CameraBase(EventDispatcher, metaclass=ABCMeta):
         self._ready = False
         self._started = False
 
-        self._clock = Clock()
         self._fps = 0
 
         super(CameraBase, self).__init__()
@@ -236,6 +235,7 @@ class CameraBase(EventDispatcher, metaclass=ABCMeta):
     def resolution(self, value):
         if value != self._resolution:
             self._resolution = value
+            self._texture = None
             if self.acquired and self.ready:
                 self.prepare()
 
@@ -257,6 +257,12 @@ class CameraBase(EventDispatcher, metaclass=ABCMeta):
 
     @fps.setter
     def fps(self, value):
+        if value <= 0:
+            Logger.info(
+                "Tried to set invalid FPS ({}), using {} as a fallback."
+                "".format(value, FALLBACK_FPS)
+            )
+            value = FALLBACK_FPS
         if value != self._fps:
             self._fps = value
             if self.started:
@@ -269,14 +275,25 @@ class CameraBase(EventDispatcher, metaclass=ABCMeta):
     correct color format, by scheduling them with Kivy's `Clock`.
     """
     def unschedule(self):
-        self.clock.unschedule(self.update)
+        Clock.unschedule(self.update)
 
     def schedule(self):
         self.unschedule()
-        self.clock.schedule(self.update, self.interval)
+        Clock.schedule_interval(self.update, self.interval)
 
-    def update(self, buffer):
-        self.texture._blit_buffer(buffer, colorfmt=self.image_format)
+    def update(self, delta):
+        print(delta)
+        if not self.started:
+            Logger.info("Camera: ignoring frame update as capture is stopped")
+            return False
+        try:
+            buffer = self.read().tostring()
+        except Exception as ex:
+            Logger.exception("Could not read from camera : {}".format(ex))
+        else:
+            self.texture.blit_buffer(buffer, colorfmt=self.image_format)
+        finally:
+            self.dispatch('on_texture')
 
     """Camera handling methods
     ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -294,22 +311,42 @@ class CameraBase(EventDispatcher, metaclass=ABCMeta):
                 "closing beforehand"
             )
             self.release()
-        self.open()
-        self._acquired = True
-        self._ready = False
+        try:
+            self.open()
+        except Exception as ex:
+            Logger.exception("Could not acquire camera : {}".format(ex))
+        else:
+            self._acquired = True
+            self._ready = False
+        finally:
+            return self.acquired
 
     def release(self):
         if self.started:
             self.stop()
-        self.close()
-        self._acquired = False
+        try:
+            self.close()
+        except Exception as ex:
+            Logger.exception("Could not close camera : {}".format(ex))
+        else:
+            self._acquired = False
+        finally:
+            return not self.acquired
 
     def prepare(self):
         self._ready = False
         if not self.acquired:
-            self._acquire()
-        self.configure()
-        self._ready = True
+            self.acquire()
+        try:
+            self.configure()
+            self._resolution = self.get_frame_resolution(self.read())
+        except Exception as ex:
+            Logger.exception("Could not prepare camera : {}".format(ex))
+        else:
+            self._ready = True
+        finally:
+            self.dispatch('on_load')
+            return self.ready
 
     """Image capture control methods
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -319,12 +356,18 @@ class CameraBase(EventDispatcher, metaclass=ABCMeta):
 
     """
     def start(self):
+        """Start the capture (schedule the frame updates)
+
+        """
         if not self.ready:
             self.prepare()
         self.schedule()
         self._started = True
 
     def stop(self):
+        """Stop the capture (unschedule the frame updates)
+
+        """
         self.unschedule()
         self._started = False
 
@@ -332,20 +375,16 @@ class CameraBase(EventDispatcher, metaclass=ABCMeta):
     ~~~~~~~~~~~~~~~~~~~
 
     These methods should be implemented by the Camera providers as
-    methods. These methods should be as idempotent as possible, the only expected
-    side-effects are the FPS and resolution changes in :func:`configure`.
+    methods. These methods should be as idempotent as possible.
+
+    All exceptions raised by these methods (subclasses of :class:`Exception`)
+    will be catched by the methods that execute them to handle proper camera
+    state rollback and event logging.
 
     """
     @abstractmethod
     def open(self):
         """Initialize capture device and acquire camera.
-
-        """
-        pass
-
-    @abstractmethod
-    def close(self):
-        """Release camera and close capture device.
 
         """
         pass
@@ -367,6 +406,13 @@ class CameraBase(EventDispatcher, metaclass=ABCMeta):
         """
         pass
 
+    @abstractmethod
+    def close(self):
+        """Release camera and close capture device.
+
+        """
+        pass
+
     """Context manager
     ~~~~~~~~~~~~~~~~~~
 
@@ -374,13 +420,13 @@ class CameraBase(EventDispatcher, metaclass=ABCMeta):
 
     """
     def __enter__(self):
-        """Enter the camera context (opens camera & starts capture)"""
+        """Enter the camera context (acquires camera & starts capture)"""
         self.start()
         return self
 
     def __exit__(self, *exc_details):
-        """Exit the camera context (stops capture & closes camera)"""
-        self.close()
+        """Exit the camera context (stops capture & releases camera)"""
+        self.release()
         return False
 
     """Retro-compatibility methods
